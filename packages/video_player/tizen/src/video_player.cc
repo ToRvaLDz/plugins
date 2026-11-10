@@ -22,6 +22,7 @@
 namespace video_player_tizen {
 
 // ziptv2: reserved header carrying the streaming buffering time.
+// Header names are mirrored in ziptv2's player_extra_headers.dart.
 static constexpr char kBufferingHeader[] = "X-Tizen-Buffering-Ms";
 // ziptv2: reserved header asking for the video hole, with the window geometry
 // in pixels: "<x>,<y>,<width>,<height>".
@@ -211,6 +212,13 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrar *plugin_registrar,
     }
   }
 
+  // ziptv2: embedded text subtitles, rendered by the app.
+  ret = player_set_subtitle_updated_cb(player_, OnSubtitleUpdated, this);
+  if (ret != PLAYER_ERROR_NONE) {
+    LOG_ERROR("[VideoPlayer] player_set_subtitle_updated_cb failed: %s",
+              get_error_message(ret));
+  }
+
   ret = player_set_buffering_cb(player_, OnBuffering, this);
   if (ret != PLAYER_ERROR_NONE) {
     player_destroy(player_);
@@ -259,6 +267,7 @@ VideoPlayer::~VideoPlayer() {
   if (player_) {
     player_unset_media_packet_video_frame_decoded_cb(player_);
     player_unset_buffering_cb(player_);
+    player_unset_subtitle_updated_cb(player_);
     player_unset_completed_cb(player_);
     player_unset_interrupted_cb(player_);
     player_unset_error_cb(player_);
@@ -752,6 +761,74 @@ void VideoPlayer::OnBuffering(int percent, void *data) {
   LOG_DEBUG("[VideoPlayer] percent: %d", percent);
 }
 
+void VideoPlayer::OnSubtitleUpdated(unsigned long duration, char *text,
+                                    void *data) {
+  auto *player = static_cast<VideoPlayer *>(data);
+  if (!player->subtitles_enabled_) {
+    return;
+  }
+  flutter::EncodableMap result = {
+      {flutter::EncodableValue("event"), flutter::EncodableValue("subtitle")},
+      {flutter::EncodableValue("text"),
+       flutter::EncodableValue(std::string(text ? text : ""))},
+      {flutter::EncodableValue("duration"),
+       flutter::EncodableValue(static_cast<int64_t>(duration))},
+  };
+  player->PushEvent(flutter::EncodableValue(result));
+}
+
+flutter::EncodableList VideoPlayer::GetTextTracks() {
+  flutter::EncodableList tracks;
+  int count = 0;
+  int ret = player_get_track_count(player_, PLAYER_STREAM_TYPE_TEXT, &count);
+  if (ret != PLAYER_ERROR_NONE || count <= 0) {
+    return tracks;
+  }
+  int current = -1;
+  if (player_get_current_track(player_, PLAYER_STREAM_TYPE_TEXT, &current) !=
+      PLAYER_ERROR_NONE) {
+    current = -1;
+  }
+  for (int i = 0; i < count; i++) {
+    flutter::EncodableMap track = {
+        {flutter::EncodableValue("index"), flutter::EncodableValue(i)},
+        {flutter::EncodableValue("isSelected"),
+         flutter::EncodableValue(subtitles_enabled_ && i == current)},
+    };
+    char *code = nullptr;
+    if (player_get_track_language_code(player_, PLAYER_STREAM_TYPE_TEXT, i,
+                                       &code) == PLAYER_ERROR_NONE &&
+        code) {
+      track[flutter::EncodableValue("language")] =
+          flutter::EncodableValue(std::string(code));
+      free(code);
+    }
+    tracks.push_back(flutter::EncodableValue(track));
+  }
+  return tracks;
+}
+
+void VideoPlayer::SelectTextTrack(int64_t index) {
+  if (index < 0) {
+    subtitles_enabled_ = false;
+    return;
+  }
+  int ret = player_select_track(player_, PLAYER_STREAM_TYPE_TEXT,
+                                static_cast<int>(index));
+  if (ret != PLAYER_ERROR_NONE) {
+    throw VideoPlayerError("player_select_track failed",
+                           get_error_message(ret));
+  }
+  subtitles_enabled_ = true;
+  // Seek in place: on TV the text track only starts delivering subtitles
+  // after the pipeline is flushed.
+  int position = 0;
+  if (!IsLive() && player_get_play_position(player_, &position) ==
+                       PLAYER_ERROR_NONE) {
+    player_set_play_position(player_, position, true, nullptr, nullptr);
+  }
+}
+
 void VideoPlayer::OnSeekCompleted(void *data) {
   LOG_DEBUG("[VideoPlayer] Seek completed.");
 
@@ -958,6 +1035,8 @@ void VideoPlayer::SetVideoHoleDisplay(const std::string &window_geometry) {
   if (ret != PLAYER_ERROR_NONE) {
     LOG_ERROR("[VideoPlayer] player_set_display_mode failed: %s",
               get_error_message(ret));
+    // Detach the overlay so that the texture fallback is the only output.
+    player_set_display(player_, PLAYER_DISPLAY_TYPE_NONE, nullptr);
     return;
   }
   video_hole_ = true;

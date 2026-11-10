@@ -11,6 +11,9 @@ import 'package:video_player_platform_interface/video_player_platform_interface.
     as platform_interface;
 
 import 'src/messages.g.dart';
+import 'src/text_tracks.dart';
+
+export 'src/text_tracks.dart' show TizenSubtitle, TizenTextTrack;
 import 'src/video_hole.dart';
 
 // TODO(JSUYA): Remove the ignore and rename parameters when adding support for platform views.
@@ -22,6 +25,43 @@ class VideoPlayerTizen extends platform_interface.VideoPlayerPlatform {
   // ziptv2: players asked for the video hole, keyed by texture id; the value
   // turns false when the native side fell back to the texture.
   final Map<int, ValueNotifier<bool>> _videoHoles = <int, ValueNotifier<bool>>{};
+
+  // ziptv2: embedded text subtitles, keyed by texture id.
+  static const MethodChannel _tracksChannel = MethodChannel('ziptv2/video_player_tizen/tracks');
+  final Map<int, StreamController<TizenSubtitle>> _subtitles =
+      <int, StreamController<TizenSubtitle>>{};
+
+  /// Embedded text subtitle tracks of the player [textureId].
+  Future<List<TizenTextTrack>> getTextTracks(int textureId) async {
+    final List<Object?>? raw = await _tracksChannel.invokeMethod<List<Object?>>(
+      'getTextTracks',
+      <String, Object>{'textureId': textureId},
+    );
+    return <TizenTextTrack>[
+      for (final Object? item in raw ?? const <Object?>[])
+        if (item is Map)
+          TizenTextTrack(
+            index: item['index'] as int,
+            isSelected: item['isSelected'] == true,
+            language: item['language'] as String?,
+          ),
+    ];
+  }
+
+  /// Selects the text track [index] of the player [textureId]; `null` turns
+  /// subtitles off.
+  Future<void> selectTextTrack(int textureId, int? index) {
+    return _tracksChannel.invokeMethod<void>('selectTextTrack', <String, Object>{
+      'textureId': textureId,
+      'index': index ?? -1,
+    });
+  }
+
+  /// Subtitle texts of the player [textureId] while a text track is selected.
+  Stream<TizenSubtitle> subtitlesFor(int textureId) => _subtitlesController(textureId).stream;
+
+  StreamController<TizenSubtitle> _subtitlesController(int textureId) =>
+      _subtitles.putIfAbsent(textureId, StreamController<TizenSubtitle>.broadcast);
 
   final TizenVideoPlayerApi _api = TizenVideoPlayerApi();
 
@@ -38,6 +78,7 @@ class VideoPlayerTizen extends platform_interface.VideoPlayerPlatform {
   @override
   Future<void> dispose(int textureId) {
     _videoHoles.remove(textureId)?.dispose();
+    _subtitles.remove(textureId)?.close();
     return _api.dispose(TextureMessage(textureId: textureId));
   }
 
@@ -164,6 +205,17 @@ class VideoPlayerTizen extends platform_interface.VideoPlayerPlatform {
           return platform_interface.VideoEvent(
             eventType: platform_interface.VideoEventType.isPlayingStateUpdate,
             isPlaying: map['isPlaying'] as bool,
+          );
+        case 'subtitle':
+          // ziptv2: not a video_player event; forwarded to subtitlesFor.
+          _subtitlesController(textureId).add(
+            TizenSubtitle(
+              text: map['text'] as String? ?? '',
+              duration: Duration(milliseconds: map['duration'] as int? ?? 0),
+            ),
+          );
+          return platform_interface.VideoEvent(
+            eventType: platform_interface.VideoEventType.unknown,
           );
         default:
           return platform_interface.VideoEvent(

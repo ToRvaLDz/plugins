@@ -51,6 +51,11 @@ class VideoPlayer {
   // plane (no texture); the area is set with SetDisplayRoi in window pixels.
   bool IsVideoHole() const { return video_hole_; }
   void SetDisplayRoi(int32_t x, int32_t y, int32_t width, int32_t height);
+  // ziptv2: embedded text subtitles. GetTextTracks returns one map per track
+  // (index, language, isSelected); SelectTextTrack(-1) turns them off. The
+  // text arrives as "subtitle" events (text, duration in ms) while enabled.
+  flutter::EncodableList GetTextTracks();
+  void SelectTextTrack(int64_t index);
   // ziptv2: the raw registrar, needed to reach the native window.
   static void SetRegistrarRef(FlutterDesktopPluginRegistrarRef registrar_ref);
   int32_t GetPosition();
@@ -77,6 +82,8 @@ class VideoPlayer {
 
   static void OnPrepared(void *data);
   static void OnBuffering(int percent, void *data);
+  static void OnSubtitleUpdated(unsigned long duration, char *text,
+                                void *data);
   static void OnSeekCompleted(void *data);
   static void OnPlayCompleted(void *data);
   static void OnInterrupted(player_interrupted_code_e code, void *data);
@@ -107,6 +114,7 @@ class VideoPlayer {
   // adaptive streaming info, which reports "not live" for a raw TS on TV.
   bool is_endless_ = false;
   bool video_hole_ = false;
+  bool subtitles_enabled_ = false;
   // ziptv2: streaming buffering time read back after it was set, in ms
   // (-1 = not requested or not readable).
   int buffering_prebuffer_ms_ = -1;

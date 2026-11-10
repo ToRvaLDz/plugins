@@ -61,6 +61,9 @@ class VideoPlayerTizenPlugin : public flutter::Plugin,
   // ziptv2: "setDisplayRoi" for the video hole (see VideoPlayer::SetDisplayRoi).
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       video_hole_channel_;
+  // ziptv2: "getTextTracks" / "selectTextTrack" for embedded subtitles.
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      tracks_channel_;
   VideoPlayerOptions options_;
   std::map<int64_t, std::unique_ptr<VideoPlayer>> players_;
 };
@@ -108,6 +111,47 @@ VideoPlayerTizenPlugin::VideoPlayerTizenPlugin(
               static_cast<int32_t>(get_int("height")));
         }
         result->Success();
+      });
+
+  tracks_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          registrar->messenger(), "ziptv2/video_player_tizen/tracks",
+          &flutter::StandardMethodCodec::GetInstance());
+  tracks_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue> &call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) {
+        const auto *args =
+            std::get_if<flutter::EncodableMap>(call.arguments());
+        if (!args) {
+          result->Error("Invalid argument", "Arguments must be a map.");
+          return;
+        }
+        auto get_int = [args](const char *key, int64_t fallback) -> int64_t {
+          auto iter = args->find(flutter::EncodableValue(key));
+          if (iter == args->end()) return fallback;
+          if (const auto *v = std::get_if<int32_t>(&iter->second)) return *v;
+          if (const auto *v = std::get_if<int64_t>(&iter->second)) return *v;
+          return fallback;
+        };
+        auto iter = players_.find(get_int("textureId", -1));
+        if (iter == players_.end()) {
+          result->Error("Invalid argument", "No player for this textureId.");
+          return;
+        }
+        try {
+          if (call.method_name() == "getTextTracks") {
+            result->Success(
+                flutter::EncodableValue(iter->second->GetTextTracks()));
+          } else if (call.method_name() == "selectTextTrack") {
+            iter->second->SelectTextTrack(get_int("index", -1));
+            result->Success();
+          } else {
+            result->NotImplemented();
+          }
+        } catch (const VideoPlayerError &error) {
+          result->Error(error.code(), error.message());
+        }
       });
 }
 
