@@ -86,6 +86,7 @@ class VideoPlayer {
   int64_t GetDuration();
   int64_t GetLiveDuration();
   bool IsLive();
+  void SetStreamingBufferingTime(const std::string &value);
 
   media_packet_h current_media_packet_ = nullptr;
   media_packet_h previous_media_packet_ = nullptr;
@@ -93,6 +94,14 @@ class VideoPlayer {
   bool is_initialized_ = false;
   bool is_rendering_ = false;
   bool is_live_ = false;
+  // ziptv2: http source whose duration is reported as 1 ms (endless stream,
+  // e.g. a raw MPEG-TS live). Unlike is_live_, it is never overwritten by the
+  // adaptive streaming info, which reports "not live" for a raw TS on TV.
+  bool is_endless_ = false;
+  // ziptv2: streaming buffering time read back after it was set, in ms
+  // (-1 = not requested or not readable).
+  int buffering_prebuffer_ms_ = -1;
+  int buffering_rebuffer_ms_ = -1;
 
   std::unique_ptr<flutter::EventChannel<flutter::EncodableValue>>
       event_channel_;

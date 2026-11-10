@@ -8,6 +8,7 @@
 #include <flutter/standard_method_codec.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <sstream>
 
@@ -16,6 +17,9 @@
 #include "video_player_error.h"
 
 namespace video_player_tizen {
+
+// ziptv2: reserved header carrying the streaming buffering time.
+static constexpr char kBufferingHeader[] = "X-Tizen-Buffering-Ms";
 
 static std::string RotationToString(player_display_rotation_e rotation) {
   switch (rotation) {
@@ -136,6 +140,17 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrar *plugin_registrar,
                     get_error_message(ret));
         }
       }
+    }
+  }
+
+  // ziptv2: streaming buffering time from the reserved header
+  // "X-Tizen-Buffering-Ms: <prebuffer>,<rebuffer>" (consumed here, never sent
+  // to the server). The native API accepts values above 1000 ms only.
+  if (!http_headers.empty()) {
+    auto iter = http_headers.find(flutter::EncodableValue(kBufferingHeader));
+    if (iter != http_headers.end() &&
+        std::holds_alternative<std::string>(iter->second)) {
+      SetStreamingBufferingTime(std::get<std::string>(iter->second));
     }
   }
 
@@ -598,8 +613,10 @@ void VideoPlayer::SendInitialized() {
     // crashing when duration is returned as 0).
     if (uri_.substr(0, 4) == "http" && duration == 1) {
       is_live_ = true;
+      is_endless_ = true;
     } else {
       is_live_ = false;
+      is_endless_ = false;
     }
 
     is_initialized_ = true;
@@ -608,6 +625,10 @@ void VideoPlayer::SendInitialized() {
          flutter::EncodableValue("initialized")},
         {flutter::EncodableValue("duration"),
          flutter::EncodableValue(duration)},
+        {flutter::EncodableValue("bufferingPrebufferMs"),
+         flutter::EncodableValue(buffering_prebuffer_ms_)},
+        {flutter::EncodableValue("bufferingRebufferMs"),
+         flutter::EncodableValue(buffering_rebuffer_ms_)},
         {flutter::EncodableValue("width"), flutter::EncodableValue(width)},
         {flutter::EncodableValue("height"), flutter::EncodableValue(height)},
     };
@@ -820,6 +841,33 @@ int64_t VideoPlayer::GetLiveDuration() {
   }
   std::vector<std::string> time_vec = split(live_duration_str, '|');
   return std::stoll(time_vec[1]);
+}
+
+void VideoPlayer::SetStreamingBufferingTime(const std::string &value) {
+  int prebuffer_ms = 0;
+  int rebuffer_ms = 0;
+  if (std::sscanf(value.c_str(), "%d,%d", &prebuffer_ms, &rebuffer_ms) != 2) {
+    LOG_ERROR("[VideoPlayer] Invalid %s: %s", kBufferingHeader, value.c_str());
+    return;
+  }
+  int ret =
+      player_set_streaming_buffering_time(player_, prebuffer_ms, rebuffer_ms);
+  if (ret != PLAYER_ERROR_NONE) {
+    LOG_ERROR("[VideoPlayer] player_set_streaming_buffering_time failed: %s",
+              get_error_message(ret));
+    return;
+  }
+  int read_prebuffer_ms = -1;
+  int read_rebuffer_ms = -1;
+  ret = player_get_streaming_buffering_time(player_, &read_prebuffer_ms,
+                                            &read_rebuffer_ms);
+  if (ret != PLAYER_ERROR_NONE) {
+    LOG_ERROR("[VideoPlayer] player_get_streaming_buffering_time failed: %s",
+              get_error_message(ret));
+    return;
+  }
+  buffering_prebuffer_ms_ = read_prebuffer_ms;
+  buffering_rebuffer_ms_ = read_rebuffer_ms;
 }
 
 bool VideoPlayer::IsLive() {

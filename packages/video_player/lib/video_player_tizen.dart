@@ -4,6 +4,7 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show debugPrint, kReleaseMode;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:video_player_platform_interface/video_player_platform_interface.dart'
@@ -110,6 +111,14 @@ class VideoPlayerTizen extends platform_interface.VideoPlayerPlatform {
       final map = event as Map<dynamic, dynamic>;
       switch (map['event']) {
         case 'initialized':
+          // ziptv2: streaming buffering time read back from the native player
+          // (-1 = not requested or not readable), logged outside release.
+          if (!kReleaseMode && map['bufferingPrebufferMs'] != null) {
+            debugPrint(
+              '[video_player_tizen] buffering '
+              '${map['bufferingPrebufferMs']}/${map['bufferingRebufferMs']} ms',
+            );
+          }
           return platform_interface.VideoEvent(
             eventType: platform_interface.VideoEventType.initialized,
             duration: Duration(milliseconds: map['duration'] as int),
