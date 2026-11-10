@@ -397,6 +397,16 @@ void VideoPlayer::SetPlaybackSpeed(double speed) {
 void VideoPlayer::SeekTo(int32_t position, SeekCompletedCallback callback) {
   LOG_DEBUG("[VideoPlayer] position: %d", position);
 
+  // ziptv2: an endless stream has no position to seek to. video_player seeks
+  // to 0 before resuming when position == duration (1 ms here), and on a raw
+  // TS the native seek fails with "Invalid state" while IsLive() reports false,
+  // so the resume never reached player_start. Complete the seek as a no-op:
+  // the play request that follows resumes from the current point.
+  if (position == 0 && is_endless_) {
+    callback();
+    return;
+  }
+
   on_seek_completed_ = std::move(callback);
   int ret =
       player_set_play_position(player_, position, true, OnSeekCompleted, this);
