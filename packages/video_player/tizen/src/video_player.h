@@ -8,6 +8,7 @@
 #include <flutter/encodable_value.h>
 #include <flutter/event_channel.h>
 #include <flutter/plugin_registrar.h>
+#include <flutter_tizen.h>
 #include <flutter/texture_registrar.h>
 #include <glib.h>
 #include <player.h>
@@ -46,6 +47,12 @@ class VideoPlayer {
   void SetVolume(double volume);
   void SetPlaybackSpeed(double speed);
   void SeekTo(int32_t position, SeekCompletedCallback callback);
+  // ziptv2: video hole. True when the video renders on the hardware video
+  // plane (no texture); the area is set with SetDisplayRoi in window pixels.
+  bool IsVideoHole() const { return video_hole_; }
+  void SetDisplayRoi(int32_t x, int32_t y, int32_t width, int32_t height);
+  // ziptv2: the raw registrar, needed to reach the native window.
+  static void SetRegistrarRef(FlutterDesktopPluginRegistrarRef registrar_ref);
   int32_t GetPosition();
   std::vector<AudioTrack> GetAudioTracks();
   void SelectAudioTrack(int64_t index);
@@ -87,6 +94,7 @@ class VideoPlayer {
   int64_t GetLiveDuration();
   bool IsLive();
   void SetStreamingBufferingTime(const std::string &value);
+  void SetVideoHoleDisplay(const std::string &window_geometry);
 
   media_packet_h current_media_packet_ = nullptr;
   media_packet_h previous_media_packet_ = nullptr;
@@ -98,6 +106,7 @@ class VideoPlayer {
   // e.g. a raw MPEG-TS live). Unlike is_live_, it is never overwritten by the
   // adaptive streaming info, which reports "not live" for a raw TS on TV.
   bool is_endless_ = false;
+  bool video_hole_ = false;
   // ziptv2: streaming buffering time read back after it was set, in ms
   // (-1 = not requested or not readable).
   int buffering_prebuffer_ms_ = -1;

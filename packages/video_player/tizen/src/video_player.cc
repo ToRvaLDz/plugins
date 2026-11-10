@@ -6,6 +6,8 @@
 
 #include <flutter/event_stream_handler_functions.h>
 #include <flutter/standard_method_codec.h>
+#include <flutter_tizen.h>
+#include <system_info.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -13,6 +15,7 @@
 #include <sstream>
 
 #include "ftpw_video_player.h"
+#include "ftpw_video_player_display.h"
 #include "log.h"
 #include "video_player_error.h"
 
@@ -20,6 +23,25 @@ namespace video_player_tizen {
 
 // ziptv2: reserved header carrying the streaming buffering time.
 static constexpr char kBufferingHeader[] = "X-Tizen-Buffering-Ms";
+// ziptv2: reserved header asking for the video hole, with the window geometry
+// in pixels: "<x>,<y>,<width>,<height>".
+static constexpr char kVideoHoleHeader[] = "X-Tizen-Video-Hole";
+
+// Tizen 11+ (Tizen Core) attaches the overlay to a tizen_core window.
+static bool IsTizenCorePlatform() {
+  static const bool is_tizen_core = [] {
+    int major = 0;
+    char *value = nullptr;
+    int ret = system_info_get_platform_string(
+        "http://tizen.org/feature/platform.version", &value);
+    if (ret == SYSTEM_INFO_ERROR_NONE && value) {
+      std::sscanf(value, "%d", &major);
+    }
+    free(value);
+    return major >= 11;
+  }();
+  return is_tizen_core;
+}
 
 static std::string RotationToString(player_display_rotation_e rotation) {
   switch (rotation) {
@@ -161,6 +183,14 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrar *plugin_registrar,
   }
   uri_ = uri;
 
+  if (!http_headers.empty()) {
+    auto iter = http_headers.find(flutter::EncodableValue(kVideoHoleHeader));
+    if (iter != http_headers.end() &&
+        std::holds_alternative<std::string>(iter->second)) {
+      SetVideoHoleDisplay(std::get<std::string>(iter->second));
+    }
+  }
+
   ret = player_set_display_visible(player_, true);
   if (ret != PLAYER_ERROR_NONE) {
     player_destroy(player_);
@@ -168,13 +198,17 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrar *plugin_registrar,
                            get_error_message(ret));
   }
 
-  ret = player_set_media_packet_video_frame_decoded_cb(
-      player_, OnVideoFrameDecoded, this);
-  if (ret != PLAYER_ERROR_NONE) {
-    player_destroy(player_);
-    throw VideoPlayerError(
-        "player_set_media_packet_video_frame_decoded_cb failed",
-        get_error_message(ret));
+  // ziptv2: in video hole mode the frames go to the video plane, not to the
+  // texture.
+  if (!video_hole_) {
+    ret = player_set_media_packet_video_frame_decoded_cb(
+        player_, OnVideoFrameDecoded, this);
+    if (ret != PLAYER_ERROR_NONE) {
+      player_destroy(player_);
+      throw VideoPlayerError(
+          "player_set_media_packet_video_frame_decoded_cb failed",
+          get_error_message(ret));
+    }
   }
 
   ret = player_set_buffering_cb(player_, OnBuffering, this);
@@ -635,6 +669,8 @@ void VideoPlayer::SendInitialized() {
          flutter::EncodableValue("initialized")},
         {flutter::EncodableValue("duration"),
          flutter::EncodableValue(duration)},
+        {flutter::EncodableValue("videoHole"),
+         flutter::EncodableValue(video_hole_)},
         {flutter::EncodableValue("bufferingPrebufferMs"),
          flutter::EncodableValue(buffering_prebuffer_ms_)},
         {flutter::EncodableValue("bufferingRebufferMs"),
@@ -878,6 +914,67 @@ void VideoPlayer::SetStreamingBufferingTime(const std::string &value) {
   }
   buffering_prebuffer_ms_ = read_prebuffer_ms;
   buffering_rebuffer_ms_ = read_rebuffer_ms;
+}
+
+static FlutterDesktopPluginRegistrarRef g_registrar_ref = nullptr;
+
+void VideoPlayer::SetRegistrarRef(
+    FlutterDesktopPluginRegistrarRef registrar_ref) {
+  g_registrar_ref = registrar_ref;
+}
+
+void VideoPlayer::SetVideoHoleDisplay(const std::string &window_geometry) {
+  int x = 0, y = 0, width = 0, height = 0;
+  if (std::sscanf(window_geometry.c_str(), "%d,%d,%d,%d", &x, &y, &width,
+                  &height) != 4 ||
+      width <= 0 || height <= 0) {
+    LOG_ERROR("[VideoPlayer] Invalid %s: %s", kVideoHoleHeader,
+              window_geometry.c_str());
+    return;
+  }
+  FlutterDesktopViewRef view =
+      g_registrar_ref ? FlutterDesktopPluginRegistrarGetView(g_registrar_ref)
+                      : nullptr;
+  void *native_window = view ? FlutterDesktopViewGetNativeHandle(view) : nullptr;
+  if (!native_window) {
+    LOG_ERROR("[VideoPlayer] Could not get a native window handle.");
+    return;
+  }
+  int ret = PLAYER_ERROR_NONE;
+  if (IsTizenCorePlatform()) {
+    ret = ftpw_video_player_videohole_player_set_tcore_display(
+        player_, PLAYER_DISPLAY_TYPE_TCORE_OVERLAY, native_window);
+  } else {
+    ret = ftpw_video_player_videohole_player_set_ecore_wl_display(
+        player_, PLAYER_DISPLAY_TYPE_OVERLAY, native_window, x, y, width,
+        height);
+  }
+  if (ret != PLAYER_ERROR_NONE) {
+    LOG_ERROR("[VideoPlayer] Setting the overlay display failed: %s",
+              get_error_message(ret));
+    return;
+  }
+  ret = player_set_display_mode(player_, PLAYER_DISPLAY_MODE_DST_ROI);
+  if (ret != PLAYER_ERROR_NONE) {
+    LOG_ERROR("[VideoPlayer] player_set_display_mode failed: %s",
+              get_error_message(ret));
+    return;
+  }
+  video_hole_ = true;
+  // Hidden until the Dart side reports where the video is drawn.
+  SetDisplayRoi(0, 0, 1, 1);
+}
+
+void VideoPlayer::SetDisplayRoi(int32_t x, int32_t y, int32_t width,
+                                int32_t height) {
+  if (!video_hole_) {
+    return;
+  }
+  int ret = player_set_display_roi_area(player_, x, y, width, height);
+  if (ret != PLAYER_ERROR_NONE) {
+    LOG_ERROR("[VideoPlayer] player_set_display_roi_area failed: %s",
+              get_error_message(ret));
+  }
 }
 
 bool VideoPlayer::IsLive() {

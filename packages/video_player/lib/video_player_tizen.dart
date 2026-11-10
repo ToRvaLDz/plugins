@@ -11,6 +11,7 @@ import 'package:video_player_platform_interface/video_player_platform_interface.
     as platform_interface;
 
 import 'src/messages.g.dart';
+import 'src/video_hole.dart';
 
 // TODO(JSUYA): Remove the ignore and rename parameters when adding support for platform views.
 // ignore_for_file: avoid_renaming_method_parameters
@@ -18,6 +19,10 @@ import 'src/messages.g.dart';
 /// A Tizen implementation of [VideoPlayerPlatform] that uses the
 /// Pigeon-generated [TizenVideoPlayerApi].
 class VideoPlayerTizen extends platform_interface.VideoPlayerPlatform {
+  // ziptv2: players asked for the video hole, keyed by texture id; the value
+  // turns false when the native side fell back to the texture.
+  final Map<int, ValueNotifier<bool>> _videoHoles = <int, ValueNotifier<bool>>{};
+
   final TizenVideoPlayerApi _api = TizenVideoPlayerApi();
 
   /// Registers this class as the default platform instance.
@@ -32,6 +37,7 @@ class VideoPlayerTizen extends platform_interface.VideoPlayerPlatform {
 
   @override
   Future<void> dispose(int textureId) {
+    _videoHoles.remove(textureId)?.dispose();
     return _api.dispose(TextureMessage(textureId: textureId));
   }
 
@@ -64,6 +70,10 @@ class VideoPlayerTizen extends platform_interface.VideoPlayerPlatform {
     );
 
     final TextureMessage response = await _api.create(message);
+    // ziptv2: video hole requested; the initialized event confirms it.
+    if (httpHeaders.containsKey(videoHoleHeader)) {
+      _videoHoles[response.textureId] = ValueNotifier<bool>(true);
+    }
     return response.textureId;
   }
 
@@ -111,6 +121,9 @@ class VideoPlayerTizen extends platform_interface.VideoPlayerPlatform {
       final map = event as Map<dynamic, dynamic>;
       switch (map['event']) {
         case 'initialized':
+          // ziptv2: back to the texture if the native player could not set
+          // up the video hole.
+          _videoHoles[textureId]?.value = map['videoHole'] == true;
           // ziptv2: streaming buffering time read back from the native player
           // (-1 = not requested or not readable), logged outside release.
           if (!kReleaseMode && map['bufferingPrebufferMs'] != null) {
@@ -162,7 +175,16 @@ class VideoPlayerTizen extends platform_interface.VideoPlayerPlatform {
 
   @override
   Widget buildView(int textureId) {
-    return Texture(textureId: textureId);
+    final ValueNotifier<bool>? hole = _videoHoles[textureId];
+    if (hole == null) {
+      return Texture(textureId: textureId);
+    }
+    return ValueListenableBuilder<bool>(
+      valueListenable: hole,
+      builder: (BuildContext context, bool isHole, Widget? _) => isHole
+          ? VideoHoleView(textureId: textureId)
+          : Texture(textureId: textureId),
+    );
   }
 
   @override

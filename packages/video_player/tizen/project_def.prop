@@ -28,4 +28,4 @@ USER_CPP_OPTS += -include src/encodable_value_compat.h
 
 # User libraries
 USER_LIB_DIRS += lib/${BUILD_ARCH}
-USER_LIBS += ftpw_video_player
+USER_LIBS += ftpw_video_player ftpw_video_player_videohole

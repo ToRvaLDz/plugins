@@ -6,7 +6,9 @@
 
 #include <app_common.h>
 #include <flutter/encodable_value.h>
+#include <flutter/method_channel.h>
 #include <flutter/plugin_registrar.h>
+#include <flutter/standard_method_codec.h>
 
 #include <cstdint>
 #include <map>
@@ -56,6 +58,9 @@ class VideoPlayerTizenPlugin : public flutter::Plugin,
 
   flutter::PluginRegistrar *plugin_registrar_;
   flutter::TextureRegistrar *texture_registrar_;
+  // ziptv2: "setDisplayRoi" for the video hole (see VideoPlayer::SetDisplayRoi).
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      video_hole_channel_;
   VideoPlayerOptions options_;
   std::map<int64_t, std::unique_ptr<VideoPlayer>> players_;
 };
@@ -72,6 +77,38 @@ VideoPlayerTizenPlugin::VideoPlayerTizenPlugin(
   texture_registrar_ = registrar->texture_registrar();
 
   TizenVideoPlayerApi::SetUp(registrar->messenger(), this);
+
+  video_hole_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          registrar->messenger(), "ziptv2/video_player_tizen/video_hole",
+          &flutter::StandardMethodCodec::GetInstance());
+  video_hole_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue> &call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) {
+        const auto *args =
+            std::get_if<flutter::EncodableMap>(call.arguments());
+        if (call.method_name() != "setDisplayRoi" || !args) {
+          result->NotImplemented();
+          return;
+        }
+        auto get_int = [args](const char *key) -> int64_t {
+          auto iter = args->find(flutter::EncodableValue(key));
+          if (iter == args->end()) return 0;
+          if (const auto *v = std::get_if<int32_t>(&iter->second)) return *v;
+          if (const auto *v = std::get_if<int64_t>(&iter->second)) return *v;
+          return 0;
+        };
+        auto iter = players_.find(get_int("textureId"));
+        if (iter != players_.end()) {
+          iter->second->SetDisplayRoi(
+              static_cast<int32_t>(get_int("x")),
+              static_cast<int32_t>(get_int("y")),
+              static_cast<int32_t>(get_int("width")),
+              static_cast<int32_t>(get_int("height")));
+        }
+        result->Success();
+      });
 }
 
 VideoPlayerTizenPlugin::~VideoPlayerTizenPlugin() { DisposeAllPlayers(); }
@@ -304,6 +341,7 @@ std::optional<FlutterError> VideoPlayerTizenPlugin::SelectAudioTrack(
 
 void VideoPlayerTizenPluginRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
+  video_player_tizen::VideoPlayer::SetRegistrarRef(registrar);
   video_player_tizen::VideoPlayerTizenPlugin::RegisterWithRegistrar(
       flutter::PluginRegistrarManager::GetInstance()
           ->GetRegistrar<flutter::PluginRegistrar>(registrar));
