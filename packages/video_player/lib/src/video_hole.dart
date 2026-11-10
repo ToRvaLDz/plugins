@@ -15,7 +15,7 @@ import 'package:flutter/widgets.dart';
 
 /// Reserved header asking the native player for the video hole, with the
 /// window geometry in pixels: `<x>,<y>,<width>,<height>`.
-const String videoHoleHeader = 'X-Tizen-Video-Hole';
+const String videoHoleHeader = 'X-Tizen-Video-Hole'; // Mirrored in ziptv2's player_extra_headers.dart.
 
 const MethodChannel _channel = MethodChannel('ziptv2/video_player_tizen/video_hole');
 
@@ -32,14 +32,31 @@ class VideoHoleView extends StatefulWidget {
 }
 
 class _VideoHoleViewState extends State<VideoHoleView> {
+  // One persistent frame callback for every hole (persistent callbacks cannot
+  // be removed): it runs after each frame that is drawn anyway, and any move
+  // of the video area needs a frame, so no extra frames are requested.
+  static final Set<_VideoHoleViewState> _mounted = <_VideoHoleViewState>{};
+  static bool _callbackAdded = false;
+
+  static void _afterFrames(Duration _) {
+    for (final _VideoHoleViewState state in _mounted.toList()) {
+      state._afterFrame();
+    }
+  }
+
   final GlobalKey _boxKey = GlobalKey();
   Rect _sentRect = Rect.zero;
-  bool _active = true;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback(_afterFrame);
+    _mounted.add(this);
+    if (!_callbackAdded) {
+      _callbackAdded = true;
+      WidgetsBinding.instance.addPersistentFrameCallback(_afterFrames);
+    }
+    // The first frame may already be drawn: make sure one more comes.
+    WidgetsBinding.instance.scheduleFrame();
   }
 
   @override
@@ -52,14 +69,14 @@ class _VideoHoleViewState extends State<VideoHoleView> {
 
   @override
   void dispose() {
-    _active = false;
+    _mounted.remove(this);
     // The video plane stays on screen otherwise: shrink it out of sight.
     _send(widget.textureId, const Rect.fromLTWH(0, 0, 1, 1));
     super.dispose();
   }
 
-  void _afterFrame(Duration _) {
-    if (!_active || !mounted) {
+  void _afterFrame() {
+    if (!mounted) {
       return;
     }
     final Rect rect = _currentRect();
@@ -67,9 +84,6 @@ class _VideoHoleViewState extends State<VideoHoleView> {
       _sentRect = rect;
       _send(widget.textureId, rect);
     }
-    WidgetsBinding.instance.addPostFrameCallback(_afterFrame);
-    // Keeps frames coming so that a move without rebuild is still followed.
-    WidgetsBinding.instance.scheduleFrame();
   }
 
   Rect _currentRect() {
