@@ -10,8 +10,8 @@
 #include <system_info.h>
 
 #include <algorithm>
-#include <cstdio>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <sstream>
@@ -58,7 +58,8 @@ static std::optional<std::string> BoundedString(const char *buf, size_t cap) {
   while (begin < len && std::isspace(static_cast<unsigned char>(buf[begin]))) {
     begin++;
   }
-  while (len > begin && std::isspace(static_cast<unsigned char>(buf[len - 1]))) {
+  while (len > begin &&
+         std::isspace(static_cast<unsigned char>(buf[len - 1]))) {
     len--;
   }
   if (len == begin) {
