@@ -29,6 +29,9 @@ struct AudioTrack {
   int32_t index;
   std::optional<std::string> language;
   bool is_selected;
+  // ziptv2: codec fourCC and channel count from the v2 track info.
+  std::optional<std::string> codec;
+  std::optional<int32_t> channel_count;
 };
 
 class VideoPlayer {

@@ -2,6 +2,8 @@
 
 * Add support for `getAudioTracks` and `selectAudioTrack`.
 * Add support for `setPreventsDisplaySleepDuringVideoPlayback`.
+* Report the codec and channel count of audio tracks, and the codec and kind (text or picture) of
+  embedded text tracks.
 
 ## 2.5.16
 

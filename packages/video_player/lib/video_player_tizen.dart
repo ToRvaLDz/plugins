@@ -44,6 +44,8 @@ class VideoPlayerTizen extends platform_interface.VideoPlayerPlatform {
             index: item['index'] as int,
             isSelected: item['isSelected'] == true,
             language: item['language'] as String?,
+            codec: item['codec'] as String?,
+            isBitmap: item['isBitmap'] == true,
           ),
     ];
   }
@@ -269,6 +271,8 @@ class VideoPlayerTizen extends platform_interface.VideoPlayerPlatform {
             label: null,
             language: track.language,
             isSelected: track.isSelected,
+            codec: track.codec,
+            channelCount: track.channelCount,
           ),
         )
         .toList();

@@ -60,6 +60,9 @@ class AudioTrackMessage {
   int trackIndex;
   String? language;
   bool isSelected;
+  // ziptv2: codec fourCC and channel count, when the platform reports them.
+  String? codec;
+  int? channelCount;
 }
 
 class SelectAudioTrackMessage {

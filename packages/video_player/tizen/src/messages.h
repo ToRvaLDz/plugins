@@ -286,7 +286,8 @@ class AudioTrackMessage {
 
   // Constructs an object setting all fields.
   explicit AudioTrackMessage(int64_t track_index, const std::string* language,
-                             bool is_selected);
+                             bool is_selected, const std::string* codec,
+                             const int64_t* channel_count);
 
   int64_t track_index() const;
   void set_track_index(int64_t value_arg);
@@ -297,6 +298,14 @@ class AudioTrackMessage {
 
   bool is_selected() const;
   void set_is_selected(bool value_arg);
+
+  const std::string* codec() const;
+  void set_codec(const std::string_view* value_arg);
+  void set_codec(std::string_view value_arg);
+
+  const int64_t* channel_count() const;
+  void set_channel_count(const int64_t* value_arg);
+  void set_channel_count(int64_t value_arg);
 
   bool operator==(const AudioTrackMessage& other) const;
   bool operator!=(const AudioTrackMessage& other) const;
@@ -316,6 +325,8 @@ class AudioTrackMessage {
   int64_t track_index_;
   std::optional<std::string> language_;
   bool is_selected_;
+  std::optional<std::string> codec_;
+  std::optional<int64_t> channel_count_;
 };
 
 // Generated class from Pigeon that represents data sent in messages.

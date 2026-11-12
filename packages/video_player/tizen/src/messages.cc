@@ -827,11 +827,15 @@ AudioTrackMessage::AudioTrackMessage(int64_t track_index, bool is_selected)
 
 AudioTrackMessage::AudioTrackMessage(int64_t track_index,
                                      const std::string* language,
-                                     bool is_selected)
+                                     bool is_selected, const std::string* codec,
+                                     const int64_t* channel_count)
     : track_index_(track_index),
       language_(language ? std::optional<std::string>(*language)
                          : std::nullopt),
-      is_selected_(is_selected) {}
+      is_selected_(is_selected),
+      codec_(codec ? std::optional<std::string>(*codec) : std::nullopt),
+      channel_count_(channel_count ? std::optional<int64_t>(*channel_count)
+                                   : std::nullopt) {}
 
 int64_t AudioTrackMessage::track_index() const { return track_index_; }
 
@@ -857,12 +861,40 @@ void AudioTrackMessage::set_is_selected(bool value_arg) {
   is_selected_ = value_arg;
 }
 
+const std::string* AudioTrackMessage::codec() const {
+  return codec_ ? &(*codec_) : nullptr;
+}
+
+void AudioTrackMessage::set_codec(const std::string_view* value_arg) {
+  codec_ = value_arg ? std::optional<std::string>(*value_arg) : std::nullopt;
+}
+
+void AudioTrackMessage::set_codec(std::string_view value_arg) {
+  codec_ = value_arg;
+}
+
+const int64_t* AudioTrackMessage::channel_count() const {
+  return channel_count_ ? &(*channel_count_) : nullptr;
+}
+
+void AudioTrackMessage::set_channel_count(const int64_t* value_arg) {
+  channel_count_ =
+      value_arg ? std::optional<int64_t>(*value_arg) : std::nullopt;
+}
+
+void AudioTrackMessage::set_channel_count(int64_t value_arg) {
+  channel_count_ = value_arg;
+}
+
 EncodableList AudioTrackMessage::ToEncodableList() const {
   EncodableList list;
-  list.reserve(3);
+  list.reserve(5);
   list.push_back(EncodableValue(track_index_));
   list.push_back(language_ ? EncodableValue(*language_) : EncodableValue());
   list.push_back(EncodableValue(is_selected_));
+  list.push_back(codec_ ? EncodableValue(*codec_) : EncodableValue());
+  list.push_back(channel_count_ ? EncodableValue(*channel_count_)
+                                : EncodableValue());
   return list;
 }
 
@@ -874,13 +906,23 @@ AudioTrackMessage AudioTrackMessage::FromEncodableList(
   if (!encodable_language.IsNull()) {
     decoded.set_language(std::get<std::string>(encodable_language));
   }
+  auto& encodable_codec = list[3];
+  if (!encodable_codec.IsNull()) {
+    decoded.set_codec(std::get<std::string>(encodable_codec));
+  }
+  auto& encodable_channel_count = list[4];
+  if (!encodable_channel_count.IsNull()) {
+    decoded.set_channel_count(std::get<int64_t>(encodable_channel_count));
+  }
   return decoded;
 }
 
 bool AudioTrackMessage::operator==(const AudioTrackMessage& other) const {
   return PigeonInternalDeepEquals(track_index_, other.track_index_) &&
          PigeonInternalDeepEquals(language_, other.language_) &&
-         PigeonInternalDeepEquals(is_selected_, other.is_selected_);
+         PigeonInternalDeepEquals(is_selected_, other.is_selected_) &&
+         PigeonInternalDeepEquals(codec_, other.codec_) &&
+         PigeonInternalDeepEquals(channel_count_, other.channel_count_);
 }
 
 bool AudioTrackMessage::operator!=(const AudioTrackMessage& other) const {
@@ -892,6 +934,8 @@ size_t AudioTrackMessage::Hash() const {
   result = result * 31 + PigeonInternalDeepHash(track_index_);
   result = result * 31 + PigeonInternalDeepHash(language_);
   result = result * 31 + PigeonInternalDeepHash(is_selected_);
+  result = result * 31 + PigeonInternalDeepHash(codec_);
+  result = result * 31 + PigeonInternalDeepHash(channel_count_);
   return result;
 }
 
@@ -907,6 +951,18 @@ std::ostream& operator<<(std::ostream& os, const AudioTrackMessage& obj) {
   }
   os << ", is_selected: ";
   os << PigeonInternalToString(obj.is_selected_);
+  os << ", codec: ";
+  if (obj.codec_) {
+    os << PigeonInternalToString(*obj.codec_);
+  } else {
+    os << "null";
+  }
+  os << ", channel_count: ";
+  if (obj.channel_count_) {
+    os << PigeonInternalToString(*obj.channel_count_);
+  } else {
+    os << "null";
+  }
   os << ")";
   return os;
 }

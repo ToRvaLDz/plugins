@@ -11,11 +11,14 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <sstream>
 
 #include "ftpw_video_player.h"
 #include "ftpw_video_player_display.h"
+#include "ftpw_video_player_tracks.h"
 #include "log.h"
 #include "video_player_error.h"
 
@@ -42,6 +45,62 @@ static bool IsTizenCorePlatform() {
     return major >= 11;
   }();
   return is_tizen_core;
+}
+
+// ziptv2: reads a fixed-size char buffer that may lack a terminating NUL.
+// Returns the trimmed text, or nullopt when the buffer is null or blank.
+static std::optional<std::string> BoundedString(const char *buf, size_t cap) {
+  if (!buf) {
+    return std::nullopt;
+  }
+  size_t len = strnlen(buf, cap);
+  size_t begin = 0;
+  while (begin < len && std::isspace(static_cast<unsigned char>(buf[begin]))) {
+    begin++;
+  }
+  while (len > begin && std::isspace(static_cast<unsigned char>(buf[len - 1]))) {
+    len--;
+  }
+  if (len == begin) {
+    return std::nullopt;
+  }
+  return std::string(buf + begin, len - begin);
+}
+
+// ziptv2: true when both languages are present and differ (case-insensitive),
+// i.e. the v2 entry probably does not describe the same track.
+static bool LanguagesConflict(const std::optional<std::string> &core,
+                              const std::optional<std::string> &v2) {
+  if (!core || !v2 || core->size() != v2->size()) {
+    return core && v2;
+  }
+  for (size_t i = 0; i < core->size(); i++) {
+    if (std::tolower(static_cast<unsigned char>((*core)[i])) !=
+        std::tolower(static_cast<unsigned char>((*v2)[i]))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// ziptv2: the v2 track info is trusted only when its track count matches the
+// Core API one.
+static bool V2CountMatches(void *player, player_stream_type_e type,
+                           int count) {
+  int v2count = 0;
+  int ret = ftpw_video_player_videohole_player_get_track_count_v2(
+      player, type, &v2count);
+  if (ret != PLAYER_ERROR_NONE) {
+    LOG_INFO("[VideoPlayer] get_track_count_v2 failed (type %d): %s", type,
+             get_error_message(ret));
+    return false;
+  }
+  if (v2count != count) {
+    LOG_INFO("[VideoPlayer] v2 track count %d != %d (type %d), ignored",
+             v2count, count, type);
+    return false;
+  }
+  return true;
 }
 
 static std::string RotationToString(player_display_rotation_e rotation) {
@@ -495,6 +554,7 @@ std::vector<AudioTrack> VideoPlayer::GetAudioTracks() {
                            get_error_message(ret));
   }
 
+  const bool use_v2 = V2CountMatches(player_, PLAYER_STREAM_TYPE_AUDIO, count);
   std::vector<AudioTrack> tracks;
   for (int i = 0; i < count; i++) {
     std::optional<std::string> language;
@@ -508,7 +568,32 @@ std::vector<AudioTrack> VideoPlayer::GetAudioTracks() {
       language = code;
       free(code);
     }
-    tracks.push_back({i, language, i == current});
+    std::optional<std::string> codec;
+    std::optional<int32_t> channel_count;
+    if (use_v2) {
+      player_audio_track_info_v2 *info = nullptr;
+      int v2ret = ftpw_video_player_videohole_player_get_audio_track_info_v2(
+          player_, i, &info);
+      if (v2ret != PLAYER_ERROR_NONE || info == nullptr) {
+        LOG_ERROR("[VideoPlayer] get_audio_track_info_v2 failed: %s",
+                  get_error_message(v2ret));
+      } else {
+        auto v2_language =
+            BoundedString(info->language, sizeof(info->language));
+        if (LanguagesConflict(language, v2_language)) {
+          LOG_INFO("[VideoPlayer] audio track %d: v2 language mismatch", i);
+        } else {
+          codec = BoundedString(info->fourCC, sizeof(info->fourCC));
+          if (info->channel > 0) {
+            channel_count = info->channel;
+          }
+          if (!language) {
+            language = v2_language;
+          }
+        }
+      }
+    }
+    tracks.push_back({i, language, i == current, codec, channel_count});
   }
   return tracks;
 }
@@ -789,6 +874,7 @@ flutter::EncodableList VideoPlayer::GetTextTracks() {
       PLAYER_ERROR_NONE) {
     current = -1;
   }
+  const bool use_v2 = V2CountMatches(player_, PLAYER_STREAM_TYPE_TEXT, count);
   for (int i = 0; i < count; i++) {
     flutter::EncodableMap track = {
         {flutter::EncodableValue("index"), flutter::EncodableValue(i)},
@@ -796,12 +882,39 @@ flutter::EncodableList VideoPlayer::GetTextTracks() {
          flutter::EncodableValue(subtitles_enabled_ && i == current)},
     };
     char *code = nullptr;
+    std::optional<std::string> language;
     if (player_get_track_language_code(player_, PLAYER_STREAM_TYPE_TEXT, i,
                                        &code) == PLAYER_ERROR_NONE &&
         code) {
-      track[flutter::EncodableValue("language")] =
-          flutter::EncodableValue(std::string(code));
+      language = std::string(code);
       free(code);
+    }
+    if (use_v2) {
+      player_subtitle_track_info_v2 *info = nullptr;
+      int v2ret = ftpw_video_player_videohole_player_get_subtitle_track_info_v2(
+          player_, i, &info);
+      if (v2ret != PLAYER_ERROR_NONE || info == nullptr) {
+        LOG_ERROR("[VideoPlayer] get_subtitle_track_info_v2 failed: %s",
+                  get_error_message(v2ret));
+      } else {
+        auto v2_language =
+            BoundedString(info->language, sizeof(info->language));
+        if (LanguagesConflict(language, v2_language)) {
+          LOG_INFO("[VideoPlayer] text track %d: v2 language mismatch", i);
+        } else {
+          auto codec = BoundedString(info->fourCC, sizeof(info->fourCC));
+          if (codec) {
+            track[flutter::EncodableValue("codec")] =
+                flutter::EncodableValue(*codec);
+          }
+          track[flutter::EncodableValue("isBitmap")] =
+              flutter::EncodableValue(info->subtitle_type == 1);
+        }
+      }
+    }
+    if (language) {
+      track[flutter::EncodableValue("language")] =
+          flutter::EncodableValue(*language);
     }
     tracks.push_back(flutter::EncodableValue(track));
   }

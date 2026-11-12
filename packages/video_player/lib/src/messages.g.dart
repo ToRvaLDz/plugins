@@ -408,7 +408,13 @@ class MixWithOthersMessage {
 }
 
 class AudioTrackMessage {
-  AudioTrackMessage({required this.trackIndex, this.language, required this.isSelected});
+  AudioTrackMessage({
+    required this.trackIndex,
+    this.language,
+    required this.isSelected,
+    this.codec,
+    this.channelCount,
+  });
 
   int trackIndex;
 
@@ -416,8 +422,12 @@ class AudioTrackMessage {
 
   bool isSelected;
 
+  String? codec;
+
+  int? channelCount;
+
   List<Object?> _toList() {
-    return <Object?>[trackIndex, language, isSelected];
+    return <Object?>[trackIndex, language, isSelected, codec, channelCount];
   }
 
   Object encode() {
@@ -430,6 +440,8 @@ class AudioTrackMessage {
       trackIndex: result[0]! as int,
       language: result[1] as String?,
       isSelected: result[2]! as bool,
+      codec: result[3] as String?,
+      channelCount: result[4] as int?,
     );
   }
 
@@ -444,7 +456,9 @@ class AudioTrackMessage {
     }
     return _deepEquals(trackIndex, other.trackIndex) &&
         _deepEquals(language, other.language) &&
-        _deepEquals(isSelected, other.isSelected);
+        _deepEquals(isSelected, other.isSelected) &&
+        _deepEquals(codec, other.codec) &&
+        _deepEquals(channelCount, other.channelCount);
   }
 
   @override
@@ -453,7 +467,7 @@ class AudioTrackMessage {
 
   @override
   String toString() {
-    return 'AudioTrackMessage(trackIndex: $trackIndex, language: $language, isSelected: $isSelected)';
+    return 'AudioTrackMessage(trackIndex: $trackIndex, language: $language, isSelected: $isSelected, codec: $codec, channelCount: $channelCount)';
   }
 }
 

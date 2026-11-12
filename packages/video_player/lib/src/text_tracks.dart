@@ -11,7 +11,13 @@ import 'package:flutter/foundation.dart';
 @immutable
 class TizenTextTrack {
   /// Creates a [TizenTextTrack].
-  const TizenTextTrack({required this.index, required this.isSelected, this.language});
+  const TizenTextTrack({
+    required this.index,
+    required this.isSelected,
+    this.language,
+    this.codec,
+    this.isBitmap = false,
+  });
 
   /// Index of the track, as passed to `selectTextTrack`.
   final int index;
@@ -21,6 +27,13 @@ class TizenTextTrack {
 
   /// Language code reported by the native player, if any.
   final String? language;
+
+  /// Codec fourCC reported by the native player, if any.
+  final String? codec;
+
+  /// Whether the track is a picture (bitmap) subtitle, which cannot be shown
+  /// as text. False for text tracks and when the native player does not say.
+  final bool isBitmap;
 }
 
 /// A subtitle text to show for [duration] from now.

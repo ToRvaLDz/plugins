@@ -358,6 +358,12 @@ ErrorOr<flutter::EncodableList> VideoPlayerTizenPlugin::GetAudioTracks(
       if (track.language) {
         message.set_language(*track.language);
       }
+      if (track.codec) {
+        message.set_codec(*track.codec);
+      }
+      if (track.channel_count) {
+        message.set_channel_count(*track.channel_count);
+      }
       result.push_back(flutter::CustomEncodableValue(message));
     }
   } catch (const VideoPlayerError &error) {
