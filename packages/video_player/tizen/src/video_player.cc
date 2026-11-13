@@ -870,8 +870,6 @@ void VideoPlayer::OnSubtitleUpdated(unsigned long duration, char *text,
   player->PushEvent(flutter::EncodableValue(result));
 }
 
-
-
 flutter::EncodableList VideoPlayer::GetTextTracks() {
   flutter::EncodableList tracks;
   int count = 0;
