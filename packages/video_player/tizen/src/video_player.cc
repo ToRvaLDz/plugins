@@ -69,15 +69,22 @@ static std::optional<std::string> BoundedString(const char *buf, size_t cap) {
 }
 
 // ziptv2: true when both languages are present and differ (case-insensitive),
-// i.e. the v2 entry probably does not describe the same track.
+// i.e. the v2 entry probably does not describe the same track. A 2-letter and
+// a 3-letter code agree when the shorter is a prefix of the longer: on TV the
+// Core API reports text tracks as "it" while v2 reports "ita".
 static bool LanguagesConflict(const std::optional<std::string> &core,
                               const std::optional<std::string> &v2) {
-  if (!core || !v2 || core->size() != v2->size()) {
-    return core && v2;
+  if (!core || !v2) {
+    return false;
   }
-  for (size_t i = 0; i < core->size(); i++) {
-    if (std::tolower(static_cast<unsigned char>((*core)[i])) !=
-        std::tolower(static_cast<unsigned char>((*v2)[i]))) {
+  const std::string &a = core->size() <= v2->size() ? *core : *v2;
+  const std::string &b = core->size() <= v2->size() ? *v2 : *core;
+  if (a.size() != b.size() && !(a.size() == 2 && b.size() == 3)) {
+    return true;
+  }
+  for (size_t i = 0; i < a.size(); i++) {
+    if (std::tolower(static_cast<unsigned char>(a[i])) !=
+        std::tolower(static_cast<unsigned char>(b[i]))) {
       return true;
     }
   }
@@ -863,6 +870,8 @@ void VideoPlayer::OnSubtitleUpdated(unsigned long duration, char *text,
   player->PushEvent(flutter::EncodableValue(result));
 }
 
+
+
 flutter::EncodableList VideoPlayer::GetTextTracks() {
   flutter::EncodableList tracks;
   int count = 0;
@@ -903,11 +912,8 @@ flutter::EncodableList VideoPlayer::GetTextTracks() {
         if (LanguagesConflict(language, v2_language)) {
           LOG_INFO("[VideoPlayer] text track %d: v2 language mismatch", i);
         } else {
-          auto codec = BoundedString(info->fourCC, sizeof(info->fourCC));
-          if (codec) {
-            track[flutter::EncodableValue("codec")] =
-                flutter::EncodableValue(*codec);
-          }
+          // The v2 fourCC of a text track holds its language on TV, not a
+          // codec: only the subtitle type is reported.
           track[flutter::EncodableValue("isBitmap")] =
               flutter::EncodableValue(info->subtitle_type == 1);
         }

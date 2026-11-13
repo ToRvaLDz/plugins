@@ -44,7 +44,6 @@ class VideoPlayerTizen extends platform_interface.VideoPlayerPlatform {
             index: item['index'] as int,
             isSelected: item['isSelected'] == true,
             language: item['language'] as String?,
-            codec: item['codec'] as String?,
             isBitmap: item['isBitmap'] == true,
           ),
     ];
